@@ -48,7 +48,7 @@ st.markdown(
         background-color: #005a5a !important;
         color: #ffffff !important;
     }
-    .stCheckbox label p {
+    .stCheckbox label p, .stRadio label p {
         color: #1e293b !important;
     }
     
@@ -111,6 +111,13 @@ def extract_handle_from_url(url):
         return url_clean
     return None
 
+def extract_video_id_from_url(url):
+    if pd.isna(url) or not isinstance(url, str):
+        return None
+    url = url.strip()
+    match = re.search(r'(?:shorts/|v=|be/|embed/)([a-zA-Z0-9_-]{11})', url)
+    return match.group(1) if match else None
+
 def format_iso_duration(duration_iso):
     try:
         duration = isodate.parse_duration(duration_iso)
@@ -127,232 +134,286 @@ def format_iso_duration(duration_iso):
         return "Unknown", False
 
 # ==========================================
-# INTERFACE FRONT-END LAYOUT
+# INTERFACE MASTER ROUTER LAYOUT
 # ==========================================
 st.title("YouTube Performance Metrics Auditor")
-st.write("Configure your target parameters below and drop your spreadsheet to launch direct server queries.")
 
-st.write("### 1. Select Content Tiers to Analyze")
-col1, col2 = st.columns(2)
-with col1:
-    want_shorts = st.checkbox("Shorts Form Content (<= 60s)", value=True)
-with col2:
-    want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
-    
-st.write("### 2. Configure Dynamic Analysis Thresholds")
-# 🎯 FIXED: Converted from number_input to an actual interactive horizontal slider bar widget
-max_videos_to_scan = st.slider(
-    "Maximum videos/shorts to analyze per profile:", 
-    min_value=1, 
-    max_value=50, 
-    value=10, 
-    step=1,
-    help="Drag to select how many chronological video timeline items you want to audit from each creator channel feed."
+# Master operational mode switch selector
+audit_mode = st.radio(
+    "What mode would you like to run today?",
+    options=["Track Specific Campaign Video Links", "Get Average Channel Metrics of YouTubers"],
+    index=0
 )
+
+# Initialize master state triggers based on layout routing choices
+if audit_mode == "Get Average Channel Metrics of YouTubers":
+    st.write("---")
+    st.write("### 1. Select Content Tiers to Analyze")
+    col1, col2 = st.columns(2)
+    with col1:
+        want_shorts = st.checkbox("Shorts Form Content (<= 60s)", value=True)
+    with col2:
+        want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
+        
+    st.write("### 2. Configure Dynamic Analysis Thresholds")
+    max_videos_to_scan = st.slider(
+        "Maximum videos/shorts to analyze per profile:", 
+        min_value=1, max_value=50, value=10, step=1
+    )
+        
+    st.write("### 3. Select Summary Performance Filters")
+    c_left, c_right = st.columns(2)
+    with c_left:
+        m_views = st.checkbox("Average Views", value=True)
+        m_likes = st.checkbox("Average Likes", value=True)
+        m_comments = st.checkbox("Average Comments", value=True)
+        m_er = st.checkbox("Engagement Rate (ER) %", value=True)
+    with c_right:
+        m_creation = st.checkbox("Channel Creation Date", value=True)
+        m_uploads = st.checkbox("Total Videos Uploaded", value=True)
+        m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
     
-st.write("### 3. Select Summary Performance Filters")
-c_left, c_right = st.columns(2)
-with c_left:
-    m_views = st.checkbox("Average Views", value=True)
-    m_likes = st.checkbox("Average Likes", value=True)
-    m_comments = st.checkbox("Average Comments", value=True)
-    m_er = st.checkbox("Engagement Rate (ER) %", value=True)
+    st.info("Note: Watch time and conversion data require private account authentication models.")
 
-with c_right:
-    m_creation = st.checkbox("Channel Creation Date", value=True)
-    m_uploads = st.checkbox("Total Videos Uploaded", value=True)
-    m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
-
-st.info("Note: Average watch time and traffic conversion values require private owner OAuth2 credentials.")
-
-st.write("### 4. Upload Campaign Tracker Sheet")
+st.write("---")
+st.write("### Upload Campaign Input Sheet")
 uploaded_file = st.file_uploader("Select Ingestion Spreadsheet Tracker (.xlsx)", type=["xlsx"])
 
-# Execution Core Pipeline Engine Activation
+# Execution Pipeline Logic Flow Routing Engine
 if uploaded_file:
     df_inputs = pd.read_excel(uploaded_file)
-    URL_COLUMN_NAME = "Channel Link" if "Channel Link" in df_inputs.columns else df_inputs.columns[0]
-    st.write(f"📂 **Active File Target Registered:** Detected `{len(df_inputs)}` creators mapped to column `{URL_COLUMN_NAME}`.")
     
+    if audit_mode == "Track Specific Campaign Video Links":
+        URL_COLUMN_NAME = "Video Link" if "Video Link" in df_inputs.columns else df_inputs.columns[0]
+        st.write(f"🎯 **Campaign Tracking Mode Registered:** Mapped `{len(df_inputs)}` links from column: `{URL_COLUMN_NAME}`.")
+    else:
+        URL_COLUMN_NAME = "Channel Link" if "Channel Link" in df_inputs.columns else df_inputs.columns[0]
+        st.write(f"📂 **Channel Performance Mode Registered:** Mapped `{len(df_inputs)}` profiles from column: `{URL_COLUMN_NAME}`.")
+        
     if st.button("Run Audit Pipeline"):
-        if not want_shorts and not want_longform:
-            st.error("Please select at least one content tier checkbox (Shorts or Long-form) to proceed.")
-        else:
-            status_box = st.empty()
-            status_box.info("Initializing connection to Google Cloud API layer...")
-            
-            profile_summary_rows = []
+        status_box = st.empty()
+        
+        # ==============================================================================
+        # RUNNING ROUTE A: TRACK DIRECT VIDEO LINKS
+        # ==============================================================================
+        if audit_mode == "Track Specific Campaign Video Links":
+            status_box.info("Querying individual campaign video metrics layout...")
             granular_video_rows = []
-            skipped_video_rows = []
             
-            total_creators = len(df_inputs)
+            raw_urls = df_inputs[URL_COLUMN_NAME].dropna().tolist()
+            url_map = {extract_video_id_from_url(url): url for url in raw_urls if extract_video_id_from_url(url)}
+            video_ids = list(url_map.keys())
             
-            for idx, row in df_inputs.iterrows():
-                profile_url = row[URL_COLUMN_NAME]
-                if pd.isna(profile_url): 
-                    continue
+            if not video_ids:
+                st.error("Missing valid video or shorts URLs inside input target column structure.")
+            else:
+                for i in range(0, len(video_ids), 50):
+                    batch_ids = video_ids[i:i+50]
+                    status_box.info(f"Extracting server packet slice [{min(i+50, len(video_ids))}/{len(video_ids)}]...")
                     
-                handle = extract_handle_from_url(profile_url)
-                if not handle:
-                    status_box.warning(f"Row {idx + 1}: Skipping invalid channel handle profile link layout.")
-                    continue
-                    
-                status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
+                    try:
+                        video_response = youtube.videos().list(
+                            part="statistics,snippet,contentDetails", id=",".join(batch_ids)
+                        ).execute()
+                        
+                        for video in video_response.get("items", []):
+                            v_id = video["id"]
+                            stats = video["statistics"]
+                            snippet = video["snippet"]
+                            
+                            duration_iso = video["contentDetails"]["duration"]
+                            raw_pub_time = snippet.get("publishedAt", "")
+                            video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
+                            duration_text, _ = format_iso_duration(duration_iso)
+                            
+                            granular_video_rows.append({
+                                "Video Link": url_map[v_id],
+                                "Channel Title": snippet.get("channelTitle", "Unknown"),
+                                "Title": snippet.get("title", ""),
+                                "Views": int(stats.get("viewCount", 0)),
+                                "Likes": int(stats.get("likeCount", 0)),
+                                "Comments": int(stats.get("commentCount", 0)),
+                                "Duration": duration_text,
+                                "Publish Date": video_publish_date
+                            })
+                    except Exception as e:
+                        st.error(f"Execution batch query aborted by server: {str(e)}")
                 
-                try:
-                    channel_response = youtube.channels().list(
-                        part="id,statistics,contentDetails,snippet", 
-                        forHandle=handle
-                    ).execute()
-                    
-                    if not channel_response.get("items"):
-                        continue
+                output_file_path = "audited_youtube_metrics.xlsx"
+                with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+                    pd.DataFrame(granular_video_rows).to_excel(writer, sheet_name="Shorts Campaign Metrics", index=False)
+                
+                status_box.empty()
+                st.success("Analysis complete! Export report sheet compiled below.")
+                
+                with open(output_file_path, "rb") as file_bytes:
+                    st.download_button(
+                        label="📥 Download Campaign Report", data=file_bytes,
+                        file_name="youtube_campaign_shorts_report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+        # ==============================================================================
+        # RUNNING ROUTE B: GET CHANNELS AVERAGES 
+        # ==============================================================================
+        else:
+            if not want_shorts and not want_longform:
+                st.error("Please select at least one content configuration type checkbox to proceed.")
+            else:
+                status_box.info("Connecting to Google API data endpoints...")
+                profile_summary_rows = []
+                granular_video_rows = []
+                skipped_video_rows = []
+                total_creators = len(df_inputs)
+                
+                for idx, row in df_inputs.iterrows():
+                    profile_url = row[URL_COLUMN_NAME]
+                    if pd.isna(profile_url): continue
                         
-                    channel_data = channel_response["items"][0]
-                    channel_id = channel_data["id"]
-                    
-                    sub_count = int(channel_data["statistics"].get("subscriberCount", 0))
-                    total_lifetime_views = int(channel_data["statistics"].get("viewCount", 0))
-                    total_videos_uploaded = int(channel_data["statistics"].get("videoCount", 0))
-                    
-                    raw_create_time = channel_data["snippet"].get("publishedAt", "")
-                    channel_creation_date = raw_create_time.split("T")[0] if "T" in raw_create_time else "Unknown"
-                    
-                    uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
-                    
-                    fetch_limit = min(50, max(30, max_videos_to_scan * 3))
-                    
-                    playlist_response = youtube.playlistItems().list(
-                        part="contentDetails",
-                        playlistId=uploads_playlist_id,
-                        maxResults=fetch_limit
-                    ).execute()
-                    
-                    video_ids = [item["contentDetails"]["videoId"] for item in playlist_response.get("items", [])]
-                    
-                    if not video_ids:
-                        continue
+                    handle = extract_handle_from_url(profile_url)
+                    if not handle: continue
                         
-                    video_response = youtube.videos().list(
-                        part="statistics,snippet,contentDetails",
-                        id=",".join(video_ids)
-                    ).execute()
+                    status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
                     
-                    temp_profile_metrics = []
-                    
-                    for video in video_response.get("items", []):
-                        stats = video["statistics"]
-                        title = video["snippet"]["title"]
-                        v_id = video["id"]
+                    try:
+                        channel_response = youtube.channels().list(
+                            part="id,statistics,contentDetails,snippet", forHandle=handle
+                        ).execute()
                         
-                        duration_iso = video["contentDetails"]["duration"]
-                        raw_pub_time = video["snippet"].get("publishedAt", "")
-                        video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
+                        if not channel_response.get("items"): continue
+                            
+                        channel_data = channel_response["items"][0]
+                        channel_id = channel_data["id"]
                         
-                        duration_text, is_short = format_iso_duration(duration_iso)
-                        video_url = f"https://www.youtube.com/shorts/{v_id}" if is_short else f"https://www.youtube.com/watch?v={v_id}"
+                        sub_count = int(channel_data["statistics"].get("subscriberCount", 0))
+                        total_lifetime_views = int(channel_data["statistics"].get("viewCount", 0))
+                        total_videos_uploaded = int(channel_data["statistics"].get("videoCount", 0))
                         
-                        v_views = int(stats.get("viewCount", 0))
-                        v_likes = int(stats.get("likeCount", 0))
-                        v_comments = int(stats.get("commentCount", 0))
+                        raw_create_time = channel_data["snippet"].get("publishedAt", "")
+                        channel_creation_date = raw_create_time.split("T")[0] if "T" in raw_create_time else "Unknown"
                         
-                        if is_short and not want_shorts:
-                            continue
-                        if not is_short and not want_longform:
-                            skipped_video_rows.append({
+                        uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
+                        fetch_limit = min(50, max(30, max_videos_to_scan * 3))
+                        
+                        playlist_response = youtube.playlistItems().list(
+                            part="contentDetails", playlistId=uploads_playlist_id, maxResults=fetch_limit
+                        ).execute()
+                        
+                        video_ids = [item["contentDetails"]["videoId"] for item in playlist_response.get("items", [])]
+                        if not video_ids: continue
+                            
+                        video_response = youtube.videos().list(
+                            part="statistics,snippet,contentDetails", id=",".join(video_ids)
+                        ).execute()
+                        
+                        temp_profile_metrics = []
+                        
+                        for video in video_response.get("items", []):
+                            stats = video["statistics"]
+                            title = video["snippet"]["title"]
+                            v_id = video["id"]
+                            
+                            duration_iso = video["contentDetails"]["duration"]
+                            raw_pub_time = video["snippet"].get("publishedAt", "")
+                            video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
+                            
+                            duration_text, is_short = format_iso_duration(duration_iso)
+                            video_url = f"https://www.youtube.com/shorts/{v_id}" if is_short else f"https://www.youtube.com/watch?v={v_id}"
+                            
+                            v_views = int(stats.get("viewCount", 0))
+                            v_likes = int(stats.get("likeCount", 0))
+                            v_comments = int(stats.get("commentCount", 0))
+                            
+                            if is_short and not want_shorts: continue
+                            if not is_short and not want_longform:
+                                skipped_video_rows.append({
+                                    "Channel Link": profile_url, "Handle": handle, "Video URL": video_url,
+                                    "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments,
+                                    "Duration": duration_text, "Publish Date": video_publish_date,
+                                    "Skip Reason": "Filtered Out: Content Type is Long-form"
+                                })
+                                continue
+                                
+                            if len(temp_profile_metrics) >= max_videos_to_scan: continue
+                                
+                            temp_profile_metrics.append({
                                 "Channel Link": profile_url, "Handle": handle, "Video URL": video_url,
                                 "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments,
-                                "Duration": duration_text, "Publish Date": video_publish_date,
-                                "Skip Reason": "Filtered Out: Content Type is Long-form"
+                                "Duration": duration_text, "Publish Date": video_publish_date
                             })
-                            continue
-                            
-                        if len(temp_profile_metrics) >= max_videos_to_scan:
-                            continue
-                            
-                        temp_profile_metrics.append({
-                            "Channel Link": profile_url, "Handle": handle, "Video URL": video_url,
-                            "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments,
-                            "Duration": duration_text, "Publish Date": video_publish_date
-                        })
 
-                    if temp_profile_metrics:
-                        df_temp = pd.DataFrame(temp_profile_metrics)
-                        
-                        if len(df_temp) >= 4:
-                            q1 = df_temp["Views"].quantile(0.25)
-                            q3 = df_temp["Views"].quantile(0.75)
-                            iqr = q3 - q1
-                            upper_bound = q3 + (1.5 * iqr)
+                        if temp_profile_metrics:
+                            df_temp = pd.DataFrame(temp_profile_metrics)
                             
-                            df_organic = df_temp[df_temp["Views"] <= upper_bound]
-                            df_boosted = df_temp[df_temp["Views"] > upper_bound]
+                            if len(df_temp) >= 4:
+                                q1 = df_temp["Views"].quantile(0.25)
+                                q3 = df_temp["Views"].quantile(0.75)
+                                iqr = q3 - q1
+                                upper_bound = q3 + (1.5 * iqr)
+                                
+                                df_organic = df_temp[df_temp["Views"] <= upper_bound]
+                                df_boosted = df_temp[df_temp["Views"] > upper_bound]
+                                
+                                for _, b_row in df_boosted.iterrows():
+                                    skipped_video_rows.append({
+                                        "Channel Link": b_row["Channel Link"], "Handle": b_row["Handle"], "Video URL": b_row["Video URL"],
+                                        "Title": b_row["Title"], "Views": b_row["Views"], "Likes": b_row["Likes"], "Comments": b_row["Comments"],
+                                        "Duration": b_row["Duration"], "Publish Date": b_row["Publish Date"],
+                                        "Skip Reason": "Boosted Ad Outlier (IQR Filter)"
+                                    })
+                            else:
+                                df_organic = df_temp
+                                
+                            for _, o_row in df_organic.iterrows():
+                                granular_video_rows.append(dict(o_row))
+                                
+                            raw_avg_v = df_organic["Views"].mean() if not df_organic.empty else 0
+                            raw_avg_l = df_organic["Likes"].mean() if not df_organic.empty else 0
+                            raw_avg_c = df_organic["Comments"].mean() if not df_organic.empty else 0
                             
-                            for _, b_row in df_boosted.iterrows():
-                                skipped_video_rows.append({
-                                    "Channel Link": b_row["Channel Link"], "Handle": b_row["Handle"], "Video URL": b_row["Video URL"],
-                                    "Title": b_row["Title"], "Views": b_row["Views"], "Likes": b_row["Likes"], "Comments": b_row["Comments"],
-                                    "Duration": b_row["Duration"], "Publish Date": b_row["Publish Date"],
-                                    "Skip Reason": "Boosted Ad Outlier (IQR Filter)"
-                                })
+                            summary_card = {
+                                "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": len(df_organic)
+                            }
+                            
+                            if m_creation: summary_card["Channel Creation Date"] = channel_creation_date
+                            if m_uploads: summary_card["Total Videos Uploaded"] = total_videos_uploaded
+                            if m_lifetime: summary_card["Total Lifetime Views"] = total_lifetime_views
+                            if m_views: summary_card["Avg Views"] = round(raw_avg_v, 2)
+                            if m_likes: summary_card["Avg Likes"] = round(raw_avg_l, 2)
+                            if m_comments: summary_card["Avg Comments"] = round(raw_avg_c, 2)
+                            if m_er:
+                                calculated_er = ((raw_avg_l + raw_avg_c) / sub_count * 100) if sub_count > 0 else 0.0
+                                summary_card["Avg Engagement Rate (%)"] = round(calculated_er, 2)
+                            
+                            summary_card["Status"] = "Success"
+                            profile_summary_rows.append(summary_card)
                         else:
-                            df_organic = df_temp
-                            
-                        for _, o_row in df_organic.iterrows():
-                            granular_video_rows.append(dict(o_row))
-                            
-                        raw_avg_v = df_organic["Views"].mean() if not df_organic.empty else 0
-                        raw_avg_l = df_organic["Likes"].mean() if not df_organic.empty else 0
-                        raw_avg_c = df_organic["Comments"].mean() if not df_organic.empty else 0
-                        
-                        summary_card = {
-                            "Channel Link": profile_url, 
-                            "Handle": handle, 
-                            "Subscribers": sub_count, 
-                            "Recent Videos Processed": len(df_organic)
-                        }
-                        
-                        if m_creation: summary_card["Channel Creation Date"] = channel_creation_date
-                        if m_uploads: summary_card["Total Videos Uploaded"] = total_videos_uploaded
-                        if m_lifetime: summary_card["Total Lifetime Views"] = total_lifetime_views
-                        if m_views: summary_card["Avg Views"] = round(raw_avg_v, 2)
-                        if m_likes: summary_card["Avg Likes"] = round(raw_avg_l, 2)
-                        if m_comments: summary_card["Avg Comments"] = round(raw_avg_c, 2)
-                        if m_er:
-                            calculated_er = ((raw_avg_l + raw_avg_c) / sub_count * 100) if sub_count > 0 else 0.0
-                            summary_card["Avg Engagement Rate (%)"] = round(calculated_er, 2)
-                        
-                        summary_card["Status"] = "Success"
-                        profile_summary_rows.append(summary_card)
-                    else:
-                        profile_summary_rows.append({
-                            "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": 0, "Status": "No Content Found"
-                        })
-                        
-                    time.sleep(0.1)
-                except Exception as e:
-                    status_box.warning(f"Error handling channel {handle}: {str(e)}")
+                            profile_summary_rows.append({
+                                "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": 0, "Status": "No Content Found"
+                            })
+                        time.sleep(0.1)
+                    except Exception as e:
+                        status_box.warning(f"Error handling channel {handle}: {str(e)}")
 
-            df_skipped_sheet = pd.DataFrame(skipped_video_rows)
-            if df_skipped_sheet.empty:
-                df_skipped_sheet = pd.DataFrame(columns=["Channel Link", "Handle", "Video URL", "Title", "Views", "Likes", "Comments", "Duration", "Publish Date", "Skip Reason"])
+                df_skipped_sheet = pd.DataFrame(skipped_video_rows)
+                if df_skipped_sheet.empty:
+                    df_skipped_sheet = pd.DataFrame(columns=["Channel Link", "Handle", "Video URL", "Title", "Views", "Likes", "Comments", "Duration", "Publish Date", "Skip Reason"])
 
-            output_file_path = "audited_youtube_metrics.xlsx"
-            with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
-                pd.DataFrame(profile_summary_rows).to_excel(writer, sheet_name="Channel Summary", index=False)
-                pd.DataFrame(granular_video_rows).to_excel(writer, sheet_name="Video Metrics", index=False)
-                df_skipped_sheet.to_excel(writer, sheet_name="Skipped Content", index=False)
+                output_file_path = "audited_youtube_metrics.xlsx"
+                with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+                    pd.DataFrame(profile_summary_rows).to_excel(writer, sheet_name="Channel Summary", index=False)
+                    pd.DataFrame(granular_video_rows).to_excel(writer, sheet_name="Video Metrics", index=False)
+                    df_skipped_sheet.to_excel(writer, sheet_name="Skipped Content", index=False)
 
-            status_box.empty()
-            st.success("Campaign data parsing complete! Your multi-sheet file ready for export.")
-            
-            with open(output_file_path, "rb") as file_bytes:
-                st.download_button(
-                    label="📥 Download Performance Report",
-                    data=file_bytes,
-                    file_name="youtube_metrics_audit_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                status_box.empty()
+                st.success("Campaign data parsing complete! Report compiled successfully.")
+                
+                with open(output_file_path, "rb") as file_bytes:
+                    st.download_button(
+                        label="📥 Download Performance Report", data=file_bytes,
+                        file_name="youtube_metrics_audit_report.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
 # ==========================================
 # BRANDING LOGO COMPONENT (BOTTOM MIDDLE)
