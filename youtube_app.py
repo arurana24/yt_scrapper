@@ -11,7 +11,7 @@ from googleapiclient.discovery import build
 # ==========================================
 st.set_page_config(page_title="Video Metrics Auditor", layout="centered")
 
-# Custom CSS to force the exact #81d8d0 background color and clean text styling
+# CSS Injection for #81d8d0 App Background and #008080 (Dark Turquoise) UI Controls
 st.markdown(
     """
     <style>
@@ -22,33 +22,45 @@ st.markdown(
         color: #1e293b !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    div.stButton > button {
-        background-color: #1e293b !important;
+    /* Action Buttons Styles Override */
+    div.stButton > button, div.stDownloadButton > button {
+        background-color: #008080 !important;
         color: #ffffff !important;
         border-radius: 6px;
-        border: none;
-        padding: 0.5rem 2rem;
+        border: 1px solid #005a5a;
+        padding: 0.6rem 2.5rem;
         font-weight: bold;
+        font-size: 16px;
+        transition: background-color 0.3s ease;
     }
-    div.stButton > button:hover {
-        background-color: #334155 !important;
+    div.stButton > button:hover, div.stDownloadButton > button:hover {
+        background-color: #005a5a !important;
         color: #ffffff !important;
+        border-color: #004040;
     }
     .stFileUploader section {
-        background-color: rgba(255, 255, 255, 0.4) !important;
-        border: 2px dashed #1e293b !important;
+        background-color: rgba(255, 255, 255, 0.5) !important;
+        border: 2px dashed #008080 !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# ==========================================
+# BRANDING LOGO COMPONENT LAYOUT
+# ==========================================
+if os.path.exists("logo.jpeg"):
+    st.image("logo.jpeg", width=140)
+else:
+    st.markdown("### 📊 Platform Metrics Tracker")
+
 # Hardcoded Secure API access token definition
 API_KEY = "AIzaSyCRyoLF6fe9jZ5ozZWRNar-E6YmPw6JBZI"
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
 # ==========================================
-# AUXILIARY PARSING FUNCTIONS
+# UTILITY HELPER RUNTIME FUNCTIONS
 # ==========================================
 def extract_handle_from_url(url):
     if pd.isna(url) or not isinstance(url, str): 
@@ -61,13 +73,21 @@ def extract_handle_from_url(url):
         return url_clean
     return None
 
-def is_shorts_duration(duration_iso):
+def format_iso_duration(duration_iso):
+    """Translates YouTube's complex ISO strings into highly readable clean text formats"""
     try:
         duration = isodate.parse_duration(duration_iso)
-        total_seconds = duration.total_seconds()
-        return total_seconds <= 60
+        total_seconds = int(duration.total_seconds())
+        is_short = total_seconds <= 60
+        
+        if total_seconds < 60:
+            return f"{total_seconds}s", is_short
+        
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes}m {seconds}s", is_short
     except Exception:
-        return False
+        return "Unknown", False
 
 # ==========================================
 # INTERFACE FRONT-END LAYOUT
@@ -75,7 +95,6 @@ def is_shorts_duration(duration_iso):
 st.title("YouTube Performance Metrics Auditor")
 st.write("Upload your spreadsheet tracking matrix to analyze organic content tier metrics directly from the API.")
 
-# Step 1: File Ingestion Section
 uploaded_file = st.file_uploader("Select Ingestion Spreadsheet Tracker (.xlsx)", type=["xlsx"])
 
 if uploaded_file:
@@ -84,7 +103,6 @@ if uploaded_file:
     
     st.write(f"Detected file containing {len(df_inputs)} rows. Column layout target maps to: `{URL_COLUMN_NAME}`")
     
-    # Step 2: Content Tier Settings
     st.write("### 1. Select Content Tiers to Analyze")
     col1, col2 = st.columns(2)
     with col1:
@@ -92,18 +110,14 @@ if uploaded_file:
     with col2:
         want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
         
-    # Step 3: Metrics Selector
-    st.write("### 2. Select Metrics to Include in Summary")
-    
+    st.write("### 2. Select Summary Performance Filters")
     m_views = st.checkbox("Average Views", value=True)
     m_likes = st.checkbox("Average Likes", value=True)
     m_comments = st.checkbox("Average Comments", value=True)
     m_er = st.checkbox("Engagement Rate (ER) %", value=True, help="Calculated as ((Likes + Comments) / Subscribers) * 100")
     
-    # Notice for unavailable metrics due to privacy restrictions
-    st.info("Note: Average watch time and direct traffic conversion ratios are private metrics that require OAuth2 user authentication and cannot be accessed via public API keys.")
+    st.info("Note: Average watch time and traffic conversion values require private owner OAuth2 credentials.")
 
-    # Execution Action Trigger
     if st.button("Run Audit Pipeline"):
         if not want_shorts and not want_longform:
             st.error("Please select at least one content tier checkbox (Shorts or Long-form) to proceed.")
@@ -130,9 +144,9 @@ if uploaded_file:
                 status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
                 
                 try:
-                    # Fetch basic channel profile parameters
+                    # API Query 1: Extract basic stats + New deep channel-level dimensions
                     channel_response = youtube.channels().list(
-                        part="id,statistics,contentDetails", 
+                        part="id,statistics,contentDetails,snippet", 
                         forHandle=handle
                     ).execute()
                     
@@ -141,10 +155,19 @@ if uploaded_file:
                         
                     channel_data = channel_response["items"][0]
                     channel_id = channel_data["id"]
+                    
+                    # Core Channel Dimensions Harvest
                     sub_count = int(channel_data["statistics"].get("subscriberCount", 0))
+                    total_lifetime_views = int(channel_data["statistics"].get("viewCount", 0))
+                    total_videos_uploaded = int(channel_data["statistics"].get("videoCount", 0))
+                    
+                    # Isolate clean date from raw datetime string layout
+                    raw_create_time = channel_data["snippet"].get("publishedAt", "")
+                    channel_creation_date = raw_create_time.split("T")[0] if "T" in raw_create_time else "Unknown"
+                    
                     uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
                     
-                    # Pull chronological items bypasses pinned videos
+                    # API Query 2: Collect recent items sequentially (bypassing channel pinned items)
                     playlist_response = youtube.playlistItems().list(
                         part="contentDetails",
                         playlistId=uploads_playlist_id,
@@ -156,7 +179,7 @@ if uploaded_file:
                     if not video_ids:
                         continue
                         
-                    # Bulk pull performance metrics dimensions
+                    # API Query 3: Multi-video payload parameters download layer
                     video_response = youtube.videos().list(
                         part="statistics,snippet,contentDetails",
                         id=",".join(video_ids)
@@ -168,37 +191,40 @@ if uploaded_file:
                         stats = video["statistics"]
                         title = video["snippet"]["title"]
                         v_id = video["id"]
+                        
+                        # Fetch video runtime configurations
                         duration_iso = video["contentDetails"]["duration"]
+                        raw_pub_time = video["snippet"].get("publishedAt", "")
+                        video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
+                        
+                        duration_text, is_short = format_iso_duration(duration_iso)
+                        video_url = f"https://www.youtube.com/shorts/{v_id}" if is_short else f"https://www.youtube.com/watch?v={v_id}"
                         
                         v_views = int(stats.get("viewCount", 0))
                         v_likes = int(stats.get("likeCount", 0))
                         v_comments = int(stats.get("commentCount", 0))
                         
-                        is_short = is_shorts_duration(duration_iso)
-                        video_url = f"https://www.youtube.com/shorts/{v_id}" if is_short else f"https://www.youtube.com/watch?v={v_id}"
-                        
-                        # Apply format configuration validation switches
                         if is_short and not want_shorts:
                             continue
                         if not is_short and not want_longform:
                             skipped_video_rows.append({
                                 "Channel Link": profile_url, "Handle": handle, "Video URL": video_url,
                                 "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments,
+                                "Duration": duration_text, "Publish Date": video_publish_date,
                                 "Skip Reason": "Filtered Out: Content Type is Long-form"
                             })
                             continue
-                        if is_short and want_shorts and not want_longform:
-                            pass # matches precise requirement context
                             
                         if len(temp_profile_metrics) >= 10:
                             continue
                             
                         temp_profile_metrics.append({
                             "Channel Link": profile_url, "Handle": handle, "Video URL": video_url,
-                            "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments
+                            "Title": title, "Views": v_views, "Likes": v_likes, "Comments": v_comments,
+                            "Duration": duration_text, "Publish Date": video_publish_date
                         })
 
-                    # Perform Outlier Analysis Routing via IQR Mechanics
+                    # Perform Anomaly Mitigation Filters (IQR)
                     if temp_profile_metrics:
                         df_temp = pd.DataFrame(temp_profile_metrics)
                         
@@ -215,6 +241,7 @@ if uploaded_file:
                                 skipped_video_rows.append({
                                     "Channel Link": b_row["Channel Link"], "Handle": b_row["Handle"], "Video URL": b_row["Video URL"],
                                     "Title": b_row["Title"], "Views": b_row["Views"], "Likes": b_row["Likes"], "Comments": b_row["Comments"],
+                                    "Duration": b_row["Duration"], "Publish Date": b_row["Publish Date"],
                                     "Skip Reason": "Boosted Ad Outlier (IQR Filter)"
                                 })
                         else:
@@ -223,13 +250,20 @@ if uploaded_file:
                         for _, o_row in df_organic.iterrows():
                             granular_video_rows.append(dict(o_row))
                             
-                        # Calculate final verified metrics summary profile mappings
                         raw_avg_v = df_organic["Views"].mean() if not df_organic.empty else 0
                         raw_avg_l = df_organic["Likes"].mean() if not df_organic.empty else 0
                         raw_avg_c = df_organic["Comments"].mean() if not df_organic.empty else 0
                         
-                        # Build summary profile row dictionary dynamically based on checkboxes
-                        summary_card = {"Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Videos Processed": len(df_organic)}
+                        summary_card = {
+                            "Channel Link": profile_url, 
+                            "Handle": handle, 
+                            "Subscribers": sub_count, 
+                            "Channel Creation Date": channel_creation_date,
+                            "Total Videos Uploaded": total_videos_uploaded,
+                            "Total Lifetime Views": total_lifetime_views,
+                            "Recent Videos Processed": len(df_organic)
+                        }
+                        
                         if m_views: summary_card["Avg Views"] = round(raw_avg_v, 2)
                         if m_likes: summary_card["Avg Likes"] = round(raw_avg_l, 2)
                         if m_comments: summary_card["Avg Comments"] = round(raw_avg_c, 2)
@@ -241,17 +275,16 @@ if uploaded_file:
                         profile_summary_rows.append(summary_card)
                     else:
                         profile_summary_rows.append({
-                            "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Videos Processed": 0, "Status": "No Content Found"
+                            "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": 0, "Status": "No Content Found"
                         })
                         
                     time.sleep(0.1)
                 except Exception as e:
                     status_box.warning(f"Error handling channel {handle}: {str(e)}")
 
-            # Process Export Binary Payload Framework
             df_skipped_sheet = pd.DataFrame(skipped_video_rows)
             if df_skipped_sheet.empty:
-                df_skipped_sheet = pd.DataFrame(columns=["Channel Link", "Handle", "Video URL", "Title", "Views", "Likes", "Comments", "Skip Reason"])
+                df_skipped_sheet = pd.DataFrame(columns=["Channel Link", "Handle", "Video URL", "Title", "Views", "Likes", "Comments", "Duration", "Publish Date", "Skip Reason"])
 
             output_file_path = "audited_youtube_metrics.xlsx"
             with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
@@ -262,10 +295,9 @@ if uploaded_file:
             status_box.empty()
             st.success("Campaign data parsing complete! Your multi-sheet file ready for export.")
             
-            # Read back bytes data package to feed the native Streamlit file downloader widget
             with open(output_file_path, "rb") as file_bytes:
                 st.download_button(
-                    label="Download Audited Performance Report",
+                    label="📥 Download Performance Report",
                     data=file_bytes,
                     file_name="youtube_metrics_audit_report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
