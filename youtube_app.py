@@ -127,53 +127,53 @@ def format_iso_duration(duration_iso):
         return "Unknown", False
 
 # ==========================================
-# INTERFACE FRONT-END LAYOUT
+# INTERFACE FRONT-END LAYOUT (ALWAYS OUTSIDE)
 # ==========================================
 st.title("YouTube Performance Metrics Auditor")
-st.write("Upload your spreadsheet tracking matrix to analyze organic content tier metrics directly from the API.")
+st.write("Configure your target parameters below and drop your spreadsheet to launch direct server queries.")
 
+st.write("### 1. Select Content Tiers to Analyze")
+col1, col2 = st.columns(2)
+with col1:
+    want_shorts = st.checkbox("Shorts Form Content (<= 60s)", value=True)
+with col2:
+    want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
+    
+st.write("### 2. Configure Dynamic Analysis Thresholds")
+# Numeric counter input threshold widget - visible right away on landing load layout
+max_videos_to_scan = st.number_input(
+    "Maximum videos/shorts to analyze per profile:", 
+    min_value=1, 
+    max_value=50, 
+    value=10, 
+    step=1,
+    help="Select how many chronological video timeline items you want to audit from each creator channel feed."
+)
+    
+st.write("### 3. Select Summary Performance Filters")
+c_left, c_right = st.columns(2)
+with c_left:
+    m_views = st.checkbox("Average Views", value=True)
+    m_likes = st.checkbox("Average Likes", value=True)
+    m_comments = st.checkbox("Average Comments", value=True)
+    m_er = st.checkbox("Engagement Rate (ER) %", value=True)
+
+with c_right:
+    m_creation = st.checkbox("Channel Creation Date", value=True)
+    m_uploads = st.checkbox("Total Videos Uploaded", value=True)
+    m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
+
+st.info("Note: Average watch time and traffic conversion values require private owner OAuth2 credentials.")
+
+st.write("### 4. Upload Campaign Tracker Sheet")
 uploaded_file = st.file_uploader("Select Ingestion Spreadsheet Tracker (.xlsx)", type=["xlsx"])
 
+# Execution Core Pipeline Engine Activation
 if uploaded_file:
     df_inputs = pd.read_excel(uploaded_file)
     URL_COLUMN_NAME = "Channel Link" if "Channel Link" in df_inputs.columns else df_inputs.columns[0]
+    st.write(f"📂 **Active File Target Registered:** Detected `{len(df_inputs)}` creators mapped to column `{URL_COLUMN_NAME}`.")
     
-    st.write(f"Detected file containing {len(df_inputs)} rows. Column layout target maps to: `{URL_COLUMN_NAME}`")
-    
-    st.write("### 1. Select Content Tiers to Analyze")
-    col1, col2 = st.columns(2)
-    with col1:
-        want_shorts = st.checkbox("Shorts Form Content (<= 60s)", value=True)
-    with col2:
-        want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
-        
-    st.write("### 2. Configure Dynamic Analysis Thresholds")
-    # Dynamic payload selector widget allowing users to select evaluation volumes safely
-    max_videos_to_scan = st.number_input(
-        "Maximum videos/shorts to analyze per profile:", 
-        min_value=1, 
-        max_value=50, 
-        value=10, 
-        step=1,
-        help="Select how many chronological pieces of content you want to audit from each creator timeline."
-    )
-        
-    st.write("### 3. Select Summary Performance Filters")
-    
-    c_left, c_right = st.columns(2)
-    with c_left:
-        m_views = st.checkbox("Average Views", value=True)
-        m_likes = st.checkbox("Average Likes", value=True)
-        m_comments = st.checkbox("Average Comments", value=True)
-        m_er = st.checkbox("Engagement Rate (ER) %", value=True)
-    
-    with c_right:
-        m_creation = st.checkbox("Channel Creation Date", value=True)
-        m_uploads = st.checkbox("Total Videos Uploaded", value=True)
-        m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
-    
-    st.info("Note: Average watch time and traffic conversion values require private owner OAuth2 credentials.")
-
     if st.button("Run Audit Pipeline"):
         if not want_shorts and not want_longform:
             st.error("Please select at least one content tier checkbox (Shorts or Long-form) to proceed.")
@@ -220,7 +220,6 @@ if uploaded_file:
                     
                     uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
                     
-                    # Buffer size adjusts higher to make sure filtering matches the targeted video threshold volume
                     fetch_limit = min(50, max(30, max_videos_to_scan * 3))
                     
                     playlist_response = youtube.playlistItems().list(
@@ -268,7 +267,6 @@ if uploaded_file:
                             })
                             continue
                             
-                        # Dynamically checks evaluation targets bounds set by user input widget
                         if len(temp_profile_metrics) >= max_videos_to_scan:
                             continue
                             
