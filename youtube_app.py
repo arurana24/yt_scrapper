@@ -112,10 +112,11 @@ def extract_handle_from_url(url):
     return None
 
 def extract_video_id_from_url(url):
-    if pd.isna(url) or not isinstance(url, str):
+    if pd.isna(url):
         return None
-    url = url.strip()
-    match = re.search(r'(?:shorts/|v=|be/|embed/)([a-zA-Z0-9_-]{11})', url)
+    url_str = str(url).strip()
+    # Captures standard watch link IDs, shorts endpoint paths, or raw 11-char strings
+    match = re.search(r'(?:shorts/|v=|be/|embed/|^)([a-zA-Z0-9_-]{11})', url_str)
     return match.group(1) if match else None
 
 def format_iso_duration(duration_iso):
@@ -145,9 +146,24 @@ audit_mode = st.radio(
     index=0
 )
 
-# Initialize master state triggers based on layout routing choices
+st.write("---")
+st.write("### Configure Column Targets")
+
+# Dynamic Column Name Mapping Input Box
+if audit_mode == "Track Specific Campaign Video Links":
+    target_column_input = st.text_input(
+        "Enter the exact column name containing your Video Links:", 
+        value="Video Link",
+        help="Type the exact header case-sensitive text string from your Excel file (e.g., 'URL', 'Video Link', 'Shorts URL')."
+    )
+else:
+    target_column_input = st.text_input(
+        "Enter the exact column name containing your Channel Links:", 
+        value="Channel Link",
+        help="Type the exact header case-sensitive text string from your Excel file (e.g., 'Channel Link', 'Youtubers')."
+    )
+
 if audit_mode == "Get Average Channel Metrics of YouTubers":
-    st.write("---")
     st.write("### 1. Select Content Tiers to Analyze")
     col1, col2 = st.columns(2)
     with col1:
@@ -172,8 +188,6 @@ if audit_mode == "Get Average Channel Metrics of YouTubers":
         m_creation = st.checkbox("Channel Creation Date", value=True)
         m_uploads = st.checkbox("Total Videos Uploaded", value=True)
         m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
-    
-    st.info("Note: Watch time and conversion data require private account authentication models.")
 
 st.write("---")
 st.write("### Upload Campaign Input Sheet")
@@ -183,101 +197,104 @@ uploaded_file = st.file_uploader("Select Ingestion Spreadsheet Tracker (.xlsx)",
 if uploaded_file:
     df_inputs = pd.read_excel(uploaded_file)
     
-    if audit_mode == "Track Specific Campaign Video Links":
-        URL_COLUMN_NAME = "Video Link" if "Video Link" in df_inputs.columns else df_inputs.columns[0]
-        st.write(f"🎯 **Campaign Tracking Mode Registered:** Mapped `{len(df_inputs)}` links from column: `{URL_COLUMN_NAME}`.")
+    # Validation step to ensure user's typed column name actually exists
+    if target_column_input not in df_inputs.columns:
+        st.error(f"The column '{target_column_input}' was not found in your uploaded file. Available columns are: {list(df_inputs.columns)}")
     else:
-        URL_COLUMN_NAME = "Channel Link" if "Channel Link" in df_inputs.columns else df_inputs.columns[0]
-        st.write(f"📂 **Channel Performance Mode Registered:** Mapped `{len(df_inputs)}` profiles from column: `{URL_COLUMN_NAME}`.")
+        URL_COLUMN_NAME = target_column_input
+        st.write(f"📂 **Target Registered:** Successfully identified column `{URL_COLUMN_NAME}` with `{len(df_inputs)}` entries.")
         
-    if st.button("Run Audit Pipeline"):
-        status_box = st.empty()
-        
-        # ==============================================================================
-        # RUNNING ROUTE A: TRACK DIRECT VIDEO LINKS
-        # ==============================================================================
-        if audit_mode == "Track Specific Campaign Video Links":
-            status_box.info("Querying individual campaign video metrics layout...")
-            granular_video_rows = []
+        if st.button("Run Audit Pipeline"):
+            status_box = st.empty()
             
-            raw_urls = df_inputs[URL_COLUMN_NAME].dropna().tolist()
-            url_map = {extract_video_id_from_url(url): url for url in raw_urls if extract_video_id_from_url(url)}
-            video_ids = list(url_map.keys())
-            
-            if not video_ids:
-                st.error("Missing valid video or shorts URLs inside input target column structure.")
-            else:
-                for i in range(0, len(video_ids), 50):
-                    batch_ids = video_ids[i:i+50]
-                    status_box.info(f"Extracting server packet slice [{min(i+50, len(video_ids))}/{len(video_ids)}]...")
-                    
-                    try:
-                        video_response = youtube.videos().list(
-                            part="statistics,snippet,contentDetails", id=",".join(batch_ids)
-                        ).execute()
-                        
-                        for video in video_response.get("items", []):
-                            v_id = video["id"]
-                            stats = video["statistics"]
-                            snippet = video["snippet"]
-                            
-                            duration_iso = video["contentDetails"]["duration"]
-                            raw_pub_time = snippet.get("publishedAt", "")
-                            video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
-                            duration_text, _ = format_iso_duration(duration_iso)
-                            
-                            granular_video_rows.append({
-                                "Video Link": url_map[v_id],
-                                "Channel Title": snippet.get("channelTitle", "Unknown"),
-                                "Title": snippet.get("title", ""),
-                                "Views": int(stats.get("viewCount", 0)),
-                                "Likes": int(stats.get("likeCount", 0)),
-                                "Comments": int(stats.get("commentCount", 0)),
-                                "Duration": duration_text,
-                                "Publish Date": video_publish_date
-                            })
-                    except Exception as e:
-                        st.error(f"Execution batch query aborted by server: {str(e)}")
-                
-                output_file_path = "audited_youtube_metrics.xlsx"
-                with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
-                    pd.DataFrame(granular_video_rows).to_excel(writer, sheet_name="Shorts Campaign Metrics", index=False)
-                
-                status_box.empty()
-                st.success("Analysis complete! Export report sheet compiled below.")
-                
-                with open(output_file_path, "rb") as file_bytes:
-                    st.download_button(
-                        label="📥 Download Campaign Report", data=file_bytes,
-                        file_name="youtube_campaign_shorts_report.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-
-        # ==============================================================================
-        # RUNNING ROUTE B: GET CHANNELS AVERAGES 
-        # ==============================================================================
-        else:
-            if not want_shorts and not want_longform:
-                st.error("Please select at least one content configuration type checkbox to proceed.")
-            else:
-                status_box.info("Connecting to Google API data endpoints...")
-                profile_summary_rows = []
+            # ==============================================================================
+            # RUNNING ROUTE A: TRACK DIRECT VIDEO LINKS
+            # ==============================================================================
+            if audit_mode == "Track Specific Campaign Video Links":
+                status_box.info("Querying individual campaign video metrics layout...")
                 granular_video_rows = []
-                skipped_video_rows = []
-                total_creators = len(df_inputs)
                 
-                for idx, row in df_inputs.iterrows():
-                    profile_url = row[URL_COLUMN_NAME]
-                    if pd.isna(profile_url): continue
+                raw_urls = df_inputs[URL_COLUMN_NAME].dropna().tolist()
+                url_map = {extract_video_id_from_url(url): url for url in raw_urls if extract_video_id_from_url(url)}
+                video_ids = list(url_map.keys())
+                
+                if not video_ids:
+                    st.error("Could not parse any valid 11-character YouTube video IDs from your specified column. Double check your data rows.")
+                else:
+                    for i in range(0, len(video_ids), 50):
+                        batch_ids = video_ids[i:i+50]
+                        status_box.info(f"Extracting video statistics batch [{min(i+50, len(video_ids))}/{len(video_ids)}]...")
                         
-                    handle = extract_handle_from_url(profile_url)
-                    if not handle: continue
-                        
-                    status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
+                        try:
+                            video_response = youtube.videos().list(
+                                part="statistics,snippet,contentDetails", id=",".join(batch_ids)
+                            ).execute()
+                            
+                            for video in video_response.get("items", []):
+                                v_id = video["id"]
+                                stats = video["statistics"]
+                                snippet = video["snippet"]
+                                
+                                duration_iso = video["contentDetails"]["duration"]
+                                raw_pub_time = snippet.get("publishedAt", "")
+                                video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
+                                duration_text, _ = format_iso_duration(duration_iso)
+                                
+                                granular_video_rows.append({
+                                    "Video Link": url_map[v_id],
+                                    "Channel Title": snippet.get("channelTitle", "Unknown"),
+                                    "Title": snippet.get("title", ""),
+                                    "Views": int(stats.get("viewCount", 0)),
+                                    "Likes": int(stats.get("likeCount", 0)),
+                                    "Comments": int(stats.get("commentCount", 0)),
+                                    "Duration": duration_text,
+                                    "Publish Date": video_publish_date
+                                })
+                        except Exception as e:
+                            st.error(f"Execution batch query aborted by server: {str(e)}")
                     
-                    try:
-                        channel_response = youtube.channels().list(
-                            part="id,statistics,contentDetails,snippet", forHandle=handle
+                    if granular_video_rows:
+                        output_file_path = "audited_youtube_metrics.xlsx"
+                        with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+                            pd.DataFrame(granular_video_rows).to_excel(writer, sheet_name="Shorts Campaign Metrics", index=False)
+                        
+                        status_box.empty()
+                        st.success("Analysis complete! Export report sheet compiled below.")
+                        
+                        with open(output_file_path, "rb") as file_bytes:
+                            st.download_button(
+                                label="📥 Download Campaign Report", data=file_bytes,
+                                file_name="youtube_campaign_shorts_report.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                    else:
+                        st.error("No data recovered from the API queries.")
+
+            # ==============================================================================
+            # RUNNING ROUTE B: GET CHANNELS AVERAGES 
+            # ==============================================================================
+            else:
+                if not want_shorts and not want_longform:
+                    st.error("Please select at least one content configuration type checkbox to proceed.")
+                else:
+                    status_box.info("Connecting to Google API data endpoints...")
+                    profile_summary_rows = []
+                    granular_video_rows = []
+                    skipped_video_rows = []
+                    total_creators = len(df_inputs)
+                    
+                    for idx, row in df_inputs.iterrows():
+                        profile_url = row[URL_COLUMN_NAME]
+                        if pd.isna(profile_url): continue
+                            
+                        handle = extract_handle_from_url(profile_url)
+                        if not handle: continue
+                            
+                        status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
+                        
+                        try:
+                            channel_response = youtube.channels().list(
+                                part="id,statistics,contentDetails,snippet", forHandle=handle
                         ).execute()
                         
                         if not channel_response.get("items"): continue
