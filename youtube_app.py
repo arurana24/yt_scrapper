@@ -22,12 +22,12 @@ st.markdown(
         color: #1e293b !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    /* Action Buttons Styles Override */
+    /* Explicitly forces the button color to Dark Turquoise (#008080) and text to White */
     div.stButton > button, div.stDownloadButton > button {
         background-color: #008080 !important;
         color: #ffffff !important;
         border-radius: 6px;
-        border: 1px solid #005a5a;
+        border: 1px solid #005a5a !important;
         padding: 0.6rem 2.5rem;
         font-weight: bold;
         font-size: 16px;
@@ -36,7 +36,11 @@ st.markdown(
     div.stButton > button:hover, div.stDownloadButton > button:hover {
         background-color: #005a5a !important;
         color: #ffffff !important;
-        border-color: #004040;
+        border-color: #004040 !important;
+    }
+    /* Fixes the text visibility inside checkboxes */
+    .stCheckbox label p {
+        color: #1e293b !important;
     }
     .stFileUploader section {
         background-color: rgba(255, 255, 255, 0.5) !important;
@@ -50,8 +54,11 @@ st.markdown(
 # ==========================================
 # BRANDING LOGO COMPONENT LAYOUT
 # ==========================================
+# This looks for your logo file automatically
 if os.path.exists("logo.jpeg"):
     st.image("logo.jpeg", width=140)
+elif os.path.exists("logo.jpg"):
+    st.image("logo.jpg", width=140)
 else:
     st.markdown("### 📊 Platform Metrics Tracker")
 
