@@ -127,7 +127,7 @@ def format_iso_duration(duration_iso):
         return "Unknown", False
 
 # ==========================================
-# INTERFACE FRONT-END LAYOUT (ALWAYS OUTSIDE)
+# INTERFACE FRONT-END LAYOUT
 # ==========================================
 st.title("YouTube Performance Metrics Auditor")
 st.write("Configure your target parameters below and drop your spreadsheet to launch direct server queries.")
@@ -140,14 +140,14 @@ with col2:
     want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
     
 st.write("### 2. Configure Dynamic Analysis Thresholds")
-# Numeric counter input threshold widget - visible right away on landing load layout
-max_videos_to_scan = st.number_input(
+# 🎯 FIXED: Converted from number_input to an actual interactive horizontal slider bar widget
+max_videos_to_scan = st.slider(
     "Maximum videos/shorts to analyze per profile:", 
     min_value=1, 
     max_value=50, 
     value=10, 
     step=1,
-    help="Select how many chronological video timeline items you want to audit from each creator channel feed."
+    help="Drag to select how many chronological video timeline items you want to audit from each creator channel feed."
 )
     
 st.write("### 3. Select Summary Performance Filters")
