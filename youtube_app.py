@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import base64
 import isodate
 import pandas as pd
 import streamlit as st
@@ -11,30 +12,41 @@ from googleapiclient.discovery import build
 # ==========================================
 st.set_page_config(page_title="Video Metrics Auditor", layout="centered")
 
-# CSS Injection for #81d8d0 App Background, #008080 UI Controls, and Top-Right Logo Position
+# Helper function to convert local image to secure Base64 for HTML injection
+def get_base64_image(image_path):
+    if os.path.exists(image_path):
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    return None
+
+# Check for both jpeg and jpg variations safely
+logo_base64 = get_base64_image("logo.jpeg") or get_base64_image("logo.jpg")
+
+# Advanced CSS Injection for Background, Dark Turquoise (#008080) Controls, and Top-Right Logo
 st.markdown(
-    """
+    f"""
     <style>
-    .stApp {
+    .stApp {{
         background-color: #81d8d0;
-    }
-    h1, h2, h3, p, label, .stMarkdown {
+    }}
+    h1, h2, h3, p, label, .stMarkdown, .stText {{
         color: #1e293b !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    /* Top-Right Absolute Alignment Container for Logo */
-    .top-right-logo {
+    }}
+    /* Top-Right Fixed Floating Alignment Container for Logo */
+    .top-right-logo {{
         position: absolute;
-        top: -60px;
+        top: -50px;
         right: 0px;
         z-index: 999;
-    }
-    .top-right-logo img {
+    }}
+    .top-right-logo img {{
         width: 130px;
-        border-radius: 4px;
-    }
-    /* Action Buttons Styles Override */
-    div.stButton > button, div.stDownloadButton > button {
+        border-radius: 6px;
+        box-shadow: 0px 2px 8px rgba(0,0,0,0.1);
+    }}
+    /* Standard Action Buttons Styles (Run Audit & Download Report) */
+    div.stButton > button, div.stDownloadButton > button {{
         background-color: #008080 !important;
         color: #ffffff !important;
         border-radius: 6px;
@@ -42,33 +54,45 @@ st.markdown(
         padding: 0.6rem 2.5rem;
         font-weight: bold;
         font-size: 16px;
-        transition: background-color 0.3s ease;
-    }
-    div.stButton > button:hover, div.stDownloadButton > button:hover {
+    }}
+    div.stButton > button:hover, div.stDownloadButton > button:hover {{
         background-color: #005a5a !important;
         color: #ffffff !important;
-        border-color: #004040 !important;
-    }
-    .stCheckbox label p {
+    }}
+    .stCheckbox label p {{
         color: #1e293b !important;
-    }
-    .stFileUploader section {
+    }}
+    
+    /* 🛠️ FILE UPLOADER CUSTOM STYLE OVERRIDES */
+    .stFileUploader section {{
         background-color: rgba(255, 255, 255, 0.5) !important;
         border: 2px dashed #008080 !important;
-    }
+    }}
+    /* Turns the inner browse file button to Dark Turquoise */
+    .stFileUploader button {{
+        background-color: #008080 !important;
+        color: #ffffff !important;
+        border: 1px solid #005a5a !important;
+    }}
+    .stFileUploader button:hover {{
+        background-color: #005a5a !important;
+        color: #ffffff !important;
+    }}
+    /* Forces the '200MB per file • XLSX' guideline text to high-contrast dark color */
+    .stFileUploader [data-testid="stFileUploadDropzoneInstructions"] div, 
+    .stFileUploader [data-testid="stWidgetLabel"] p,
+    .stFileUploader span,
+    .stFileUploader small {{
+        color: #1e293b !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# ==========================================
-# BRANDING LOGO COMPONENT (TOP-RIGHT ROW)
-# ==========================================
-# Injects the logo image dynamically into the top right float layer if it exists
-if os.path.exists("logo.jpeg"):
-    st.markdown('<div class="top-right-logo"><img src="app/static/logo.jpeg"></div>', unsafe_allow_html=True)
-elif os.path.exists("logo.jpg"):
-    st.markdown('<div class="top-right-logo"><img src="app/static/logo.jpg"></div>', unsafe_allow_html=True)
+# Injects the Base64 image securely into the top-right float container if found
+if logo_base64:
+    st.markdown(f'<div class="top-right-logo"><img src="data:image/jpeg;base64,{logo_base64}"></div>', unsafe_allow_html=True)
 
 # Hardcoded Secure API access token definition
 API_KEY = "AIzaSyCRyoLF6fe9jZ5ozZWRNar-E6YmPw6JBZI"
@@ -126,7 +150,7 @@ if uploaded_file:
         
     st.write("### 2. Select Summary Performance Filters")
     
-    # Left Column for basic calculations
+    # Dual column checkboxes layout split
     c_left, c_right = st.columns(2)
     with c_left:
         m_views = st.checkbox("Average Views", value=True)
@@ -134,7 +158,6 @@ if uploaded_file:
         m_comments = st.checkbox("Average Comments", value=True)
         m_er = st.checkbox("Engagement Rate (ER) %", value=True)
     
-    # Right Column for advanced historical channels parameters
     with c_right:
         m_creation = st.checkbox("Channel Creation Date", value=True)
         m_uploads = st.checkbox("Total Videos Uploaded", value=True)
@@ -271,7 +294,7 @@ if uploaded_file:
                         raw_avg_l = df_organic["Likes"].mean() if not df_organic.empty else 0
                         raw_avg_c = df_organic["Comments"].mean() if not df_organic.empty else 0
                         
-                        # Dynamic Building Dictionary: Only includes mapping if checkbox is checked
+                        # Dynamic execution data mapping base
                         summary_card = {
                             "Channel Link": profile_url, 
                             "Handle": handle, 
