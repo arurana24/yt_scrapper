@@ -147,7 +147,18 @@ if uploaded_file:
     with col2:
         want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
         
-    st.write("### 2. Select Summary Performance Filters")
+    st.write("### 2. Configure Dynamic Analysis Thresholds")
+    # Dynamic payload selector widget allowing users to select evaluation volumes safely
+    max_videos_to_scan = st.number_input(
+        "Maximum videos/shorts to analyze per profile:", 
+        min_value=1, 
+        max_value=50, 
+        value=10, 
+        step=1,
+        help="Select how many chronological pieces of content you want to audit from each creator timeline."
+    )
+        
+    st.write("### 3. Select Summary Performance Filters")
     
     c_left, c_right = st.columns(2)
     with c_left:
@@ -209,10 +220,13 @@ if uploaded_file:
                     
                     uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
                     
+                    # Buffer size adjusts higher to make sure filtering matches the targeted video threshold volume
+                    fetch_limit = min(50, max(30, max_videos_to_scan * 3))
+                    
                     playlist_response = youtube.playlistItems().list(
                         part="contentDetails",
                         playlistId=uploads_playlist_id,
-                        maxResults=30
+                        maxResults=fetch_limit
                     ).execute()
                     
                     video_ids = [item["contentDetails"]["videoId"] for item in playlist_response.get("items", [])]
@@ -254,7 +268,8 @@ if uploaded_file:
                             })
                             continue
                             
-                        if len(temp_profile_metrics) >= 10:
+                        # Dynamically checks evaluation targets bounds set by user input widget
+                        if len(temp_profile_metrics) >= max_videos_to_scan:
                             continue
                             
                         temp_profile_metrics.append({
@@ -344,6 +359,5 @@ if uploaded_file:
 # ==========================================
 # BRANDING LOGO COMPONENT (BOTTOM MIDDLE)
 # ==========================================
-# Always renders the logo at the absolute bottom of the application workflow layout
 if logo_base64:
     st.markdown(f'<div class="bottom-logo-container"><img src="data:image/jpeg;base64,{logo_base64}"></div>', unsafe_allow_html=True)
