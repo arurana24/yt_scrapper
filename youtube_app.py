@@ -11,7 +11,7 @@ from googleapiclient.discovery import build
 # ==========================================
 st.set_page_config(page_title="Video Metrics Auditor", layout="centered")
 
-# CSS Injection for #81d8d0 App Background and #008080 (Dark Turquoise) UI Controls
+# CSS Injection for #81d8d0 App Background, #008080 UI Controls, and Top-Right Logo Position
 st.markdown(
     """
     <style>
@@ -22,7 +22,18 @@ st.markdown(
         color: #1e293b !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    /* Explicitly forces the button color to Dark Turquoise (#008080) and text to White */
+    /* Top-Right Absolute Alignment Container for Logo */
+    .top-right-logo {
+        position: absolute;
+        top: -60px;
+        right: 0px;
+        z-index: 999;
+    }
+    .top-right-logo img {
+        width: 130px;
+        border-radius: 4px;
+    }
+    /* Action Buttons Styles Override */
     div.stButton > button, div.stDownloadButton > button {
         background-color: #008080 !important;
         color: #ffffff !important;
@@ -38,7 +49,6 @@ st.markdown(
         color: #ffffff !important;
         border-color: #004040 !important;
     }
-    /* Fixes the text visibility inside checkboxes */
     .stCheckbox label p {
         color: #1e293b !important;
     }
@@ -52,15 +62,13 @@ st.markdown(
 )
 
 # ==========================================
-# BRANDING LOGO COMPONENT LAYOUT
+# BRANDING LOGO COMPONENT (TOP-RIGHT ROW)
 # ==========================================
-# This looks for your logo file automatically
+# Injects the logo image dynamically into the top right float layer if it exists
 if os.path.exists("logo.jpeg"):
-    st.image("logo.jpeg", width=140)
+    st.markdown('<div class="top-right-logo"><img src="app/static/logo.jpeg"></div>', unsafe_allow_html=True)
 elif os.path.exists("logo.jpg"):
-    st.image("logo.jpg", width=140)
-else:
-    st.markdown("### 📊 Platform Metrics Tracker")
+    st.markdown('<div class="top-right-logo"><img src="app/static/logo.jpg"></div>', unsafe_allow_html=True)
 
 # Hardcoded Secure API access token definition
 API_KEY = "AIzaSyCRyoLF6fe9jZ5ozZWRNar-E6YmPw6JBZI"
@@ -81,7 +89,6 @@ def extract_handle_from_url(url):
     return None
 
 def format_iso_duration(duration_iso):
-    """Translates YouTube's complex ISO strings into highly readable clean text formats"""
     try:
         duration = isodate.parse_duration(duration_iso)
         total_seconds = int(duration.total_seconds())
@@ -118,10 +125,20 @@ if uploaded_file:
         want_longform = st.checkbox("Long-form Videos (> 60s)", value=False)
         
     st.write("### 2. Select Summary Performance Filters")
-    m_views = st.checkbox("Average Views", value=True)
-    m_likes = st.checkbox("Average Likes", value=True)
-    m_comments = st.checkbox("Average Comments", value=True)
-    m_er = st.checkbox("Engagement Rate (ER) %", value=True, help="Calculated as ((Likes + Comments) / Subscribers) * 100")
+    
+    # Left Column for basic calculations
+    c_left, c_right = st.columns(2)
+    with c_left:
+        m_views = st.checkbox("Average Views", value=True)
+        m_likes = st.checkbox("Average Likes", value=True)
+        m_comments = st.checkbox("Average Comments", value=True)
+        m_er = st.checkbox("Engagement Rate (ER) %", value=True)
+    
+    # Right Column for advanced historical channels parameters
+    with c_right:
+        m_creation = st.checkbox("Channel Creation Date", value=True)
+        m_uploads = st.checkbox("Total Videos Uploaded", value=True)
+        m_lifetime = st.checkbox("Total Channel Lifetime Views", value=True)
     
     st.info("Note: Average watch time and traffic conversion values require private owner OAuth2 credentials.")
 
@@ -151,7 +168,6 @@ if uploaded_file:
                 status_box.info(f"Processing Handle: {handle} [{idx + 1}/{total_creators}]")
                 
                 try:
-                    # API Query 1: Extract basic stats + New deep channel-level dimensions
                     channel_response = youtube.channels().list(
                         part="id,statistics,contentDetails,snippet", 
                         forHandle=handle
@@ -163,18 +179,15 @@ if uploaded_file:
                     channel_data = channel_response["items"][0]
                     channel_id = channel_data["id"]
                     
-                    # Core Channel Dimensions Harvest
                     sub_count = int(channel_data["statistics"].get("subscriberCount", 0))
                     total_lifetime_views = int(channel_data["statistics"].get("viewCount", 0))
                     total_videos_uploaded = int(channel_data["statistics"].get("videoCount", 0))
                     
-                    # Isolate clean date from raw datetime string layout
                     raw_create_time = channel_data["snippet"].get("publishedAt", "")
                     channel_creation_date = raw_create_time.split("T")[0] if "T" in raw_create_time else "Unknown"
                     
                     uploads_playlist_id = channel_data["contentDetails"]["relatedPlaylists"]["uploads"]
                     
-                    # API Query 2: Collect recent items sequentially (bypassing channel pinned items)
                     playlist_response = youtube.playlistItems().list(
                         part="contentDetails",
                         playlistId=uploads_playlist_id,
@@ -186,7 +199,6 @@ if uploaded_file:
                     if not video_ids:
                         continue
                         
-                    # API Query 3: Multi-video payload parameters download layer
                     video_response = youtube.videos().list(
                         part="statistics,snippet,contentDetails",
                         id=",".join(video_ids)
@@ -199,7 +211,6 @@ if uploaded_file:
                         title = video["snippet"]["title"]
                         v_id = video["id"]
                         
-                        # Fetch video runtime configurations
                         duration_iso = video["contentDetails"]["duration"]
                         raw_pub_time = video["snippet"].get("publishedAt", "")
                         video_publish_date = raw_pub_time.split("T")[0] if "T" in raw_pub_time else "Unknown"
@@ -231,7 +242,6 @@ if uploaded_file:
                             "Duration": duration_text, "Publish Date": video_publish_date
                         })
 
-                    # Perform Anomaly Mitigation Filters (IQR)
                     if temp_profile_metrics:
                         df_temp = pd.DataFrame(temp_profile_metrics)
                         
@@ -261,16 +271,17 @@ if uploaded_file:
                         raw_avg_l = df_organic["Likes"].mean() if not df_organic.empty else 0
                         raw_avg_c = df_organic["Comments"].mean() if not df_organic.empty else 0
                         
+                        # Dynamic Building Dictionary: Only includes mapping if checkbox is checked
                         summary_card = {
                             "Channel Link": profile_url, 
                             "Handle": handle, 
                             "Subscribers": sub_count, 
-                            "Channel Creation Date": channel_creation_date,
-                            "Total Videos Uploaded": total_videos_uploaded,
-                            "Total Lifetime Views": total_lifetime_views,
                             "Recent Videos Processed": len(df_organic)
                         }
                         
+                        if m_creation: summary_card["Channel Creation Date"] = channel_creation_date
+                        if m_uploads: summary_card["Total Videos Uploaded"] = total_videos_uploaded
+                        if m_lifetime: summary_card["Total Lifetime Views"] = total_lifetime_views
                         if m_views: summary_card["Avg Views"] = round(raw_avg_v, 2)
                         if m_likes: summary_card["Avg Likes"] = round(raw_avg_l, 2)
                         if m_comments: summary_card["Avg Comments"] = round(raw_avg_c, 2)
