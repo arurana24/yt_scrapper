@@ -414,7 +414,6 @@ if uploaded_file:
                                 profile_summary_rows.append({
                                     "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": 0, "Status": "No Content Found"
                                 })
-                            time.sleep(0.1)
                         except Exception as e:
                             status_box.warning(f"Error handling channel {handle}: {str(e)}")
 
