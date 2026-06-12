@@ -103,20 +103,47 @@ youtube = build("youtube", "v3", developerKey=API_KEY)
 def extract_handle_from_url(url):
     if pd.isna(url) or not isinstance(url, str): 
         return None
+    
+    # Clean up whitespace and any trailing forward slashes
     url_clean = url.strip().rstrip('/')
-    match = re.search(r'(?:youtube\.com/)(@[^/?#&]+)', url_clean)
+    
+    # Match the '@' handle and capture everything up until the next slash, question mark, or hash
+    match = re.search(r'(?:youtube\.com/|si=)(@[a-zA-Z0-9_\-\.]+)', url_clean)
     if match:
         return match.group(1)
+        
+    # If the user just typed raw '@handle' without the domain prefix, check and clean it
     if url_clean.startswith('@'):
-        return url_clean
+        return url_clean.split('/')[0].split('?')[0]
+        
     return None
 
 def extract_video_id_from_url(url):
     if pd.isna(url):
         return None
     url_str = str(url).strip()
-    match = re.search(r'(?:shorts/|v=|be/|embed/|^)([a-zA-Z0-9_-]{11})', url_str)
-    return match.group(1) if match else None
+    
+    if "v=" in url_str:
+        match = re.search(r'v=([a-zA-Z0-9_-]{11})', url_str)
+        if match: return match.group(1)
+        
+    if "shorts/" in url_str:
+        match = re.search(r'shorts/([a-zA-Z0-9_-]{11})', url_str)
+        if match: return match.group(1)
+        
+    if "youtu.be/" in url_str:
+        match = re.search(r'youtu\.be/([a-zA-Z0-9_-]{11})', url_str)
+        if match: return match.group(1)
+        
+    if "embed/" in url_str:
+        match = re.search(r'embed/([a-zA-Z0-9_-]{11})', url_str)
+        if match: return match.group(1)
+        
+    match = re.search(r'^([a-zA-Z0-9_-]{11})$', url_str)
+    if match: 
+        return match.group(1)
+        
+    return None
 
 def format_iso_duration(duration_iso):
     try:
@@ -414,6 +441,7 @@ if uploaded_file:
                                 profile_summary_rows.append({
                                     "Channel Link": profile_url, "Handle": handle, "Subscribers": sub_count, "Recent Videos Processed": 0, "Status": "No Content Found"
                                 })
+                            time.sleep(0.1)
                         except Exception as e:
                             status_box.warning(f"Error handling channel {handle}: {str(e)}")
 
